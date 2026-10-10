@@ -53,13 +53,19 @@ TextureCache::TextureCache(const Vulkan::Instance& instance_, Vulkan::Scheduler&
     const s64 mem_threshold = std::min<s64>(device_local_memory, TARGET_GC_THRESHOLD);
     const s64 min_vacancy_expected = std::min((6 * mem_threshold) / 10, s64(2_GB));
     const s64 min_vacancy_critical = std::min((2 * mem_threshold) / 10, s64(512_MB));
+    // On low-VRAM cards the 2.5/3.25 GB floors always win the max, pinning the pressure mark
+    // above what buffers + render targets already consume and causing mid-frame evictions.
+    // Cap each floor at a fraction of actual device memory so large-GPU defaults can't dominate.
+    const s64 pressure_floor = std::min<s64>(DEFAULT_PRESSURE_GC_MEMORY, device_local_memory * 6 / 10);
+    const s64 critical_floor = std::min<s64>(DEFAULT_CRITICAL_GC_MEMORY, device_local_memory * 8 / 10);
     pressure_gc_memory = static_cast<u64>(
-        std::max<u64>(std::min(device_local_memory - min_vacancy_expected, min_spacing_expected),
-                      DEFAULT_PRESSURE_GC_MEMORY));
+        std::max<s64>(std::min(device_local_memory - min_vacancy_expected, min_spacing_expected),
+                      pressure_floor));
     critical_gc_memory = static_cast<u64>(
-        std::max<u64>(std::min(device_local_memory - min_vacancy_critical, min_spacing_critical),
-                      DEFAULT_CRITICAL_GC_MEMORY));
-    trigger_gc_memory = static_cast<u64>((device_local_memory - mem_threshold) / 2);
+        std::max<s64>(std::min(device_local_memory - min_vacancy_critical, min_spacing_critical),
+                      critical_floor));
+    trigger_gc_memory = static_cast<u64>(
+        std::max<s64>((device_local_memory - mem_threshold) / 2, device_local_memory / 2));
 }
 
 TextureCache::~TextureCache() = default;
@@ -1107,12 +1113,16 @@ void TextureCache::GarbageCollectImages() {
             const char* env = std::getenv("BB_GC_BUDGET_MB");
             return env ? std::strtoull(env, nullptr, 10) << 20 : 0;
         }();
-        if (instance.IsIntegrated() || forced_budget) {
+        static constexpr u64 LOW_VRAM_LIMIT = 6_GB;
+        const bool low_vram = instance.GetTotalMemoryBudget() < LOW_VRAM_LIMIT;
+        if (instance.IsIntegrated() || low_vram || forced_budget) {
             const u64 budget = forced_budget ? forced_budget : instance.GetDeviceMemoryBudgetNow();
             if (budget != 0) {
-                trigger_gc_memory = budget / 10 * 7;
-                pressure_gc_memory = budget / 100 * 85;
-                critical_gc_memory = budget / 100 * 95;
+                // Use lower percentages than integrated (70/85/95): on discrete WDDM, exceeding
+                // the budget causes driver paging which corrupts in-flight geometry.
+                trigger_gc_memory  = low_vram && !forced_budget ? budget / 100 * 60 : budget / 10 * 7;
+                pressure_gc_memory = low_vram && !forced_budget ? budget / 100 * 75 : budget / 100 * 85;
+                critical_gc_memory = low_vram && !forced_budget ? budget / 100 * 88 : budget / 100 * 95;
             }
         }
     }
