@@ -278,19 +278,28 @@ Id EmitBufferAtomicFMin32(EmitContext& ctx, IR::Inst* inst, u32 handle, Id addre
     }
 
     const auto u32_value = ctx.OpBitcast(ctx.U32[1], value);
-    // OpSelect requires a bool condition; produce one by comparing the sign bit to 0.
     const auto sign_bit_set = ctx.OpINotEqual(
         ctx.U1[1],
         ctx.OpBitFieldUExtract(ctx.U32[1], u32_value, ctx.ConstU32(31u), ctx.ConstU32(1u)),
         ctx.u32_zero_value);
 
-    // FIXME this needs control flow because it currently executes both atomics
-    const auto result = ctx.OpSelect(
-        ctx.F32[1], sign_bit_set,
-        EmitBitCastF32U32(ctx, EmitBufferAtomicUMax32(ctx, inst, handle, address, u32_value)),
-        EmitBitCastF32U32(ctx, EmitBufferAtomicSMin32(ctx, inst, handle, address, u32_value)));
-
-    return result;
+    // Negative value: UMax (larger unsigned bit pattern = more negative = FMin winner).
+    // Positive value: SMin (signed ordering matches float ordering for non-negative values).
+    // Use control flow so only one atomic executes per invocation.
+    const Id neg_label = ctx.OpLabel();
+    const Id pos_label = ctx.OpLabel();
+    const Id merge_label = ctx.OpLabel();
+    ctx.OpSelectionMerge(merge_label, spv::SelectionControlMask::MaskNone);
+    ctx.OpBranchConditional(sign_bit_set, neg_label, pos_label);
+    ctx.AddLabel(neg_label);
+    const Id neg_result = EmitBufferAtomicUMax32(ctx, inst, handle, address, u32_value);
+    ctx.OpBranch(merge_label);
+    ctx.AddLabel(pos_label);
+    const Id pos_result = EmitBufferAtomicSMin32(ctx, inst, handle, address, u32_value);
+    ctx.OpBranch(merge_label);
+    ctx.AddLabel(merge_label);
+    return ctx.OpBitcast(ctx.F32[1],
+        ctx.OpPhi(ctx.U32[1], neg_result, neg_label, pos_result, pos_label));
 }
 
 Id EmitBufferAtomicSMax32(EmitContext& ctx, IR::Inst* inst, u32 handle, Id address, Id value) {
@@ -316,19 +325,28 @@ Id EmitBufferAtomicFMax32(EmitContext& ctx, IR::Inst* inst, u32 handle, Id addre
     }
 
     const auto u32_value = ctx.OpBitcast(ctx.U32[1], value);
-    // OpSelect requires a bool condition; produce one by comparing the sign bit to 0.
     const auto sign_bit_set = ctx.OpINotEqual(
         ctx.U1[1],
         ctx.OpBitFieldUExtract(ctx.U32[1], u32_value, ctx.ConstU32(31u), ctx.ConstU32(1u)),
         ctx.u32_zero_value);
 
-    // FIXME this needs control flow because it currently executes both atomics
-    const auto result = ctx.OpSelect(
-        ctx.F32[1], sign_bit_set,
-        EmitBitCastF32U32(ctx, EmitBufferAtomicUMin32(ctx, inst, handle, address, u32_value)),
-        EmitBitCastF32U32(ctx, EmitBufferAtomicSMax32(ctx, inst, handle, address, u32_value)));
-
-    return result;
+    // Negative value: UMin (smaller unsigned bit pattern = less negative = FMax winner).
+    // Positive value: SMax (signed ordering matches float ordering for non-negative values).
+    // Use control flow so only one atomic executes per invocation.
+    const Id neg_label = ctx.OpLabel();
+    const Id pos_label = ctx.OpLabel();
+    const Id merge_label = ctx.OpLabel();
+    ctx.OpSelectionMerge(merge_label, spv::SelectionControlMask::MaskNone);
+    ctx.OpBranchConditional(sign_bit_set, neg_label, pos_label);
+    ctx.AddLabel(neg_label);
+    const Id neg_result = EmitBufferAtomicUMin32(ctx, inst, handle, address, u32_value);
+    ctx.OpBranch(merge_label);
+    ctx.AddLabel(pos_label);
+    const Id pos_result = EmitBufferAtomicSMax32(ctx, inst, handle, address, u32_value);
+    ctx.OpBranch(merge_label);
+    ctx.AddLabel(merge_label);
+    return ctx.OpBitcast(ctx.F32[1],
+        ctx.OpPhi(ctx.U32[1], neg_result, neg_label, pos_result, pos_label));
 }
 
 Id EmitBufferAtomicInc32(EmitContext& ctx, IR::Inst* inst, u32 handle, Id address) {
