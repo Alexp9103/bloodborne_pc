@@ -13,8 +13,8 @@
 
 namespace Serialization {
 /* You should increment versions below once corresponding serialization scheme is changed. */
-static constexpr u32 ShaderBinaryVersion = 8u; // driver-bounded Remix transform feedback
-static constexpr u32 ShaderMetaVersion = 8u; // ImageResource::remix_uv
+static constexpr u32 ShaderBinaryVersion = 9u; // user-data reads via flatbuf (PR #5181)
+static constexpr u32 ShaderMetaVersion = 9u; // user-data reads via flatbuf (PR #5181)
 static constexpr u32 PipelineKeyVersion = 6u; // shader runtime layout and image metadata
 } // namespace Serialization
 
@@ -377,9 +377,19 @@ void PipelineCache::WarmUp() {
     u32 num_total_pipelines{};
     u32 num_damaged{};
 
+    // Quick pre-count so we can emit N/M progress lines the launcher can display.
+    Storage::DataBase::Instance().ForEachBlob(
+        Storage::BlobType::PipelineKey, [&](std::vector<u8>&&) { ++num_total_pipelines; });
+
+    if (num_total_pipelines > 0) {
+        std::printf("BB_SHADER_WARMUP: 0/%u\n", num_total_pipelines);
+        std::fflush(stdout);
+    }
+
+    u32 num_iterated{};
     Storage::DataBase::Instance().ForEachBlob(
         Storage::BlobType::PipelineKey, [&](std::vector<u8>&& data) {
-            ++num_total_pipelines;
+            ++num_iterated;
             // bbport: a damaged entry (cut short by a crash or a power loss, or rejected by the
             // driver) used to stop the game at every start until the cache was deleted by hand
             // (issues #28, #38, #39). It is counted here and the cache is rebuilt below.
@@ -413,6 +423,11 @@ void PipelineCache::WarmUp() {
                 sel.infos.fill(nullptr);
                 sel.modules.fill(nullptr);
                 sel.fetch_shader.reset();
+            }
+
+            if (num_total_pipelines > 0 && (num_iterated % 10 == 0 || num_iterated == num_total_pipelines)) {
+                std::printf("BB_SHADER_WARMUP: %u/%u\n", num_iterated, num_total_pipelines);
+                std::fflush(stdout);
             }
         });
 

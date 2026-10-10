@@ -2155,7 +2155,6 @@ bool Rasterizer::BindResources(const Pipeline* pipeline) {
             }
             set_writes.resize(set_writes.size() + stage->buffers.size() + stage->images.size() +
                               stage->samplers.size());
-            stage->PushUd(binding, push_data);
             const PreparedStage* prepared = FindPreparedStage(*stage);
             BindBuffers(*stage, prepared, binding, push_data, set_write_index);
             BindTextures(*stage, prepared, binding, set_write_index, needs_barrier);
@@ -2184,7 +2183,6 @@ bool Rasterizer::BindResources(const Pipeline* pipeline) {
             const u32 num_descriptors =
                 num_buffers + static_cast<u32>(stage->images.size() + stage->samplers.size());
             set_writes.resize(set_writes.size() + num_descriptors);
-            stage->PushUd(binding, push_data);
             const PreparedStage* prepared = FindPreparedStage(*stage);
             buffer_stages[task.count] = {stage, prepared, binding, set_write_index};
             auto texture_binding = binding;
