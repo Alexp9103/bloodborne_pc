@@ -240,7 +240,9 @@ void TextureCache::UnmapMemory(VAddr cpu_addr, size_t size) {
     ImageIds deleted_images;
     ForEachImageInRegion(cpu_addr, size, [&](ImageId id, Image&) { deleted_images.push_back(id); });
     for (const ImageId id : deleted_images) {
-        // TODO: Download image data back to host.
+        if (slot_images[id].SafeToDownload()) {
+            DownloadImageMemory(id, true);
+        }
         FreeImage(id);
     }
 }

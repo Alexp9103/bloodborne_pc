@@ -875,16 +875,32 @@ PipelineCache::Result PipelineCache::GetProgram(PipelineSelection& sel, HwStage 
         // The walk of resource tables and the fetch shader parse read guest memory through
         // pointers in the registers; ahead of the GPU thread that memory may already be
         // reused. A fault returns here (runtime_fault_recover) and the draw is left to the GPU
-        // thread. A jump out of the specialization leaks its partial allocations (rare).
+        // thread.
         sigjmp_buf recover;
         if (sigsetjmp(recover, 0)) {
+            runtime_fault_recover = nullptr;
+            info.flattened_ud_buf.clear();
             worker.failed = true;
             return {};
         }
         runtime_fault_recover = &recover;
         info.RefreshFlatBuf();
-        auto spec = Shader::StageSpecialization(info, runtime_info, profile, binding);
         runtime_fault_recover = nullptr;
+
+        // StageSpecialization construction reads guest SHARPs; guard it separately so its
+        // destructor runs on fault (siglongjmp bypasses stack unwinding).
+        std::optional<Shader::StageSpecialization> spec_opt;
+        sigjmp_buf recover_spec;
+        if (sigsetjmp(recover_spec, 0)) {
+            runtime_fault_recover = nullptr;
+            spec_opt.reset();
+            worker.failed = true;
+            return {};
+        }
+        runtime_fault_recover = &recover_spec;
+        spec_opt.emplace(info, runtime_info, profile, binding);
+        runtime_fault_recover = nullptr;
+        auto& spec = *spec_opt;
         const auto it = std::ranges::find(program->modules, spec, &Program::Module::spec);
         if (it == program->modules.end()) {
             worker.failed = true;

@@ -104,6 +104,8 @@ public:
     void Present(Frame* frame, bool is_reusing_frame = false, bool is_game_frame = true);
     Frame* PrepareLastFrame();
 
+    [[nodiscard]] const Instance& GetInstance() const { return instance; }
+
 private:
   void PresentSingleFrame(Frame *frame, bool is_reusing_frame, bool is_game_frame);
   Frame *GetRenderFrame();

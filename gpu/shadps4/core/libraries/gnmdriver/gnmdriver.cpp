@@ -129,6 +129,10 @@ static bool RunAhead() {
     return on;
 }
 
+static u64 VramBytes() {
+    return presenter ? presenter->GetInstance().GetDeviceMemoryUsage() : 0;
+}
+
 static void WaitPreviousFrame();
 
 // BB_SUBMIT_AHEAD=K (default 2): the first K submissions of a frame do not wait for the previous
@@ -161,9 +165,12 @@ static void WatchOverlapLeak() {
     }
     static u64 frames = 0;
     static long long lowest = 0;
+    static u64 vram_lowest = 0;
     const long long live = BbHeapSites::LiveAllocations();
+    const u64 vram = VramBytes();
     if (++frames < 600 || live < lowest) {
         lowest = live; // warming up: area loads
+        vram_lowest = vram;
         return;
     }
     if (live - lowest > 100000 || runtime_heap_growths() != 0) {
@@ -171,6 +178,12 @@ static void WatchOverlapLeak() {
         std::printf("Gnm: the game's heap grows (%lld allocations over %lld): frames no longer "
                     "overlap (BB_SUBMIT_AHEAD 0)\n",
                     live - lowest, lowest);
+    }
+    if (vram > vram_lowest && vram - vram_lowest > 256ull * 1024 * 1024) {
+        overlap_off = true;
+        std::printf("Gnm: VRAM grows (%llu MB over baseline %llu MB): frames no longer "
+                    "overlap (BB_SUBMIT_AHEAD 0)\n",
+                    (vram - vram_lowest) >> 20, vram_lowest >> 20);
     }
 }
 static void WaitPreviousFrameAtSubmit() {
