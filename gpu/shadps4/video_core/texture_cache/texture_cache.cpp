@@ -48,11 +48,11 @@ TextureCache::TextureCache(const Vulkan::Instance& instance_, Vulkan::Scheduler&
     }
 
     const s64 device_local_memory = static_cast<s64>(instance.GetTotalMemoryBudget());
-    const s64 min_spacing_expected = device_local_memory - 1_GB;
-    const s64 min_spacing_critical = device_local_memory - 512_MB;
+    const s64 min_spacing_expected = device_local_memory - 700_MB;
+    const s64 min_spacing_critical = device_local_memory - 256_MB;
     const s64 mem_threshold = std::min<s64>(device_local_memory, TARGET_GC_THRESHOLD);
-    const s64 min_vacancy_expected = (6 * mem_threshold) / 10;
-    const s64 min_vacancy_critical = (2 * mem_threshold) / 10;
+    const s64 min_vacancy_expected = std::min((6 * mem_threshold) / 10, s64(2_GB));
+    const s64 min_vacancy_critical = std::min((2 * mem_threshold) / 10, s64(512_MB));
     pressure_gc_memory = static_cast<u64>(
         std::max<u64>(std::min(device_local_memory - min_vacancy_expected, min_spacing_expected),
                       DEFAULT_PRESSURE_GC_MEMORY));
@@ -1158,7 +1158,7 @@ void TextureCache::GarbageCollectImages() {
         visited = 0;
     };
     const auto clean_up = [&](ImageId image_id) {
-        if (num_deletions == 0 || ++visited > 256) {
+        if (num_deletions == 0) {
             return true;
         }
         auto& image = slot_images[image_id];
@@ -1172,6 +1172,12 @@ void TextureCache::GarbageCollectImages() {
             lru_cache.Touch(image.lru_id, gc_tick);
             BbStats::gc_kept_images.fetch_add(1, std::memory_order_relaxed);
             return false;
+        }
+        // Only count evictable candidates toward the visit budget so that a wall of tiled
+        // render targets (shadow maps, GBuffers) does not exhaust the limit before we reach
+        // any regular textures, leaving 0 evictions even at OOM pressure.
+        if (++visited > (aggresive ? 2048u : 256u)) {
+            return true;
         }
         --num_deletions;
         if (download) {
