@@ -292,6 +292,12 @@ static ABI int32_t trophy_register(int32_t ctx,int32_t handle,uint64_t options) 
 static ABI int32_t trophy_unlock(int32_t ctx,int32_t handle,int32_t id,int32_t *platinum) {
     (void)ctx; (void)handle;
     printf("Runtime: trophy %d unlocked\n",id);
+    {
+        char path[1024];
+        snprintf(path,sizeof(path),"%s/trophies.log",runtime_file_user_dir());
+        FILE *f=fopen(path,"a");
+        if (f) { fprintf(f,"%d %lld\n",id,(long long)time(NULL)); fclose(f); }
+    }
     if (platinum) *platinum=-1;
     return 0;
 }
