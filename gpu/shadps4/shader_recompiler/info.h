@@ -215,6 +215,10 @@ struct Info : InfoPersistent {
         if (ptr_index != IR::NumScalarRegs) {
             std::memcpy(&base, &ud[ptr_index], sizeof(base));
             base = reinterpret_cast<const u32*>(VAddr(base) & 0xFFFFFFFFFFFFULL);
+            if (!base) {
+                std::memset(&data, 0, sizeof(T));
+                return data;
+            }
         }
         std::memcpy(&data, base + dword_offset, sizeof(T));
         return data;
